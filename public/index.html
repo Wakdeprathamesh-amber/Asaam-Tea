@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ASSAM TEA — Steeped in Silence</title>
+  <link rel="preload" as="image" href="hero-poster.webp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -150,6 +151,17 @@
     #source-video {
       display: none;
       position: absolute;
+      pointer-events: none;
+    }
+
+    body.hero-static #hero {
+      height: 100vh;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .text-overlay {
+        text-shadow: 0 0 20px rgba(0,0,0,0.6);
+      }
     }
 
     /* ── TEXT OVERLAYS ── */
@@ -662,9 +674,7 @@
   <section id="hero">
     <div id="hero-sticky">
       <canvas id="video-canvas"></canvas>
-      <video id="source-video" muted playsinline preload="auto" crossorigin="anonymous">
-        <source src="tea-story-final.mp4" type="video/mp4" />
-      </video>
+      <video id="source-video" muted playsinline preload="metadata" poster="hero-poster.webp"></video>
 
       <!-- Overlay 1: ASSAM TEA title -->
       <div class="text-overlay" id="ov-title">ASSAM TEA</div>
@@ -722,7 +732,10 @@
       <!-- DAWN -->
       <div class="tea-card card-dawn">
         <div class="card-img-wrap">
-          <img src="dawn-product.png" alt="Dawn blend" />
+          <picture>
+            <source srcset="dawn-product.webp" type="image/webp" />
+            <img src="dawn-product.png" alt="Dawn blend" width="2048" height="1152" loading="lazy" decoding="async" />
+          </picture>
           <div class="card-img-fade"></div>
         </div>
         <div class="card-name">DAWN</div>
@@ -737,7 +750,10 @@
       <!-- DUSK -->
       <div class="tea-card card-dusk">
         <div class="card-img-wrap">
-          <img src="dusk-product.png" alt="Dusk blend" />
+          <picture>
+            <source srcset="dusk-product.webp" type="image/webp" />
+            <img src="dusk-product.png" alt="Dusk blend" width="2048" height="1152" loading="lazy" decoding="async" />
+          </picture>
           <div class="card-img-fade"></div>
         </div>
         <div class="card-badge">Bestseller</div>
@@ -753,7 +769,10 @@
       <!-- NIGHT -->
       <div class="tea-card card-night">
         <div class="card-img-wrap">
-          <img src="night-product.png" alt="Night blend" />
+          <picture>
+            <source srcset="night-product.webp" type="image/webp" />
+            <img src="night-product.png" alt="Night blend" width="2048" height="1152" loading="lazy" decoding="async" />
+          </picture>
           <div class="card-img-fade"></div>
         </div>
         <div class="card-name">NIGHT</div>
@@ -794,6 +813,15 @@
   (function () {
     'use strict';
 
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const saveData = conn && (conn.saveData || ['slow-2g', '2g'].includes(conn.effectiveType));
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+
+    if (prefersReducedMotion || saveData) {
+      document.body.classList.add('hero-static');
+    }
+
     /* ────────────────────────────────────────
        SCROLL PROGRESS BAR
     ──────────────────────────────────────── */
@@ -807,122 +835,227 @@
     window.addEventListener('scroll', updateScrollProgress, { passive: true });
 
     /* ────────────────────────────────────────
-       VIDEO FRAME EXTRACTION & CANVAS SCRUB
+       OPTIMIZED HERO ENGINE (frames / video / static)
     ──────────────────────────────────────── */
-    const video    = document.getElementById('source-video');
-    const canvas   = document.getElementById('video-canvas');
-    const ctx      = canvas.getContext('2d');
+    const video = document.getElementById('source-video');
+    const canvas = document.getElementById('video-canvas');
+    const ctx = canvas.getContext('2d');
     const loadingScreen = document.getElementById('loading-screen');
-    const barFill  = document.getElementById('loading-bar-fill');
+    const barFill = document.getElementById('loading-bar-fill');
+    const heroEl = document.getElementById('hero');
 
-    let frames       = [];
-    let totalFrames  = 0;
-    let framesLoaded = 0;
-    let rafId        = null;
+    let heroMode = 'frames';
+    let frames = [];
+    let totalFrames = 0;
+    let rafId = null;
+    let isReady = false;
+    let heroInView = true;
     let currentFrame = 0;
-    let targetFrame  = 0;
-    let isReady      = false;
+    let targetFrame = 0;
+    let animationsReady = false;
 
-    // Size canvas to viewport
+    const posterImg = new Image();
+    posterImg.src = 'hero-poster.webp';
+    posterImg.onload = () => {
+      if (!isReady || heroMode === 'static') drawPoster();
+    };
+
+    function drawPoster() {
+      if (!posterImg.complete) return;
+      ctx.drawImage(posterImg, 0, 0, canvas.width, canvas.height);
+    }
+
     function resizeCanvas() {
-      canvas.width  = window.innerWidth;
+      canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      if (isReady && frames[currentFrame]) {
+      if (heroMode === 'static' || !isReady) {
+        drawPoster();
+        return;
+      }
+      if (heroMode === 'frames' && frames[currentFrame]) {
         ctx.drawImage(frames[currentFrame], 0, 0, canvas.width, canvas.height);
+      } else if (heroMode === 'video' && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       }
     }
-    window.addEventListener('resize', resizeCanvas);
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeCanvas();
+        if (animationsReady && typeof ScrollTrigger !== 'undefined') {
+          ScrollTrigger.refresh();
+        }
+      }, 150);
+    });
     resizeCanvas();
 
-    // Seek video to time, capture frame to offscreen canvas
-    function captureFrame(time) {
-      return new Promise((resolve) => {
-        const oc = document.createElement('canvas');
-        oc.width  = video.videoWidth  || 1920;
-        oc.height = video.videoHeight || 1080;
-        const octx = oc.getContext('2d');
+    const heroObserver = new IntersectionObserver((entries) => {
+      heroInView = entries[0].isIntersecting;
+    }, { threshold: 0 });
+    heroObserver.observe(heroEl);
 
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          octx.drawImage(video, 0, 0, oc.width, oc.height);
-          resolve(oc);
+    function setLoadProgress(pct) {
+      barFill.style.width = Math.min(100, Math.round(pct)) + '%';
+    }
+
+    function finishLoading() {
+      loadingScreen.classList.add('fade-out');
+      setTimeout(() => { loadingScreen.style.display = 'none'; }, 850);
+      if (!animationsReady) {
+        animationsReady = true;
+        initAnimations();
+      }
+      startRenderLoop();
+    }
+
+    function frameUrl(index) {
+      const num = String(index + 1).padStart(4, '0');
+      return `hero-frames/frame_${num}.webp`;
+    }
+
+    function loadFrameImage(index) {
+      if (frames[index]) return Promise.resolve(frames[index]);
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          frames[index] = img;
+          resolve(img);
         };
-        video.addEventListener('seeked', onSeeked);
-        video.currentTime = time;
+        img.onerror = reject;
+        img.src = frameUrl(index);
       });
     }
 
-    // Extract frames once metadata loaded
-    async function extractFrames() {
-      const duration = video.duration;
-      // Target ~24fps equivalent but cap at 300 frames for memory
-      const fps = 24;
-      const rawCount = Math.floor(duration * fps);
-      totalFrames = Math.min(rawCount, 300);
+    async function initFrameSequence() {
+      const res = await fetch('hero-frames/frames.json');
+      if (!res.ok) throw new Error('Frame manifest unavailable');
+      const manifest = await res.json();
+      totalFrames = manifest.count;
+      const chunkSize = manifest.chunkSize || 30;
       frames = new Array(totalFrames);
 
-      for (let i = 0; i < totalFrames; i++) {
-        const t = (i / (totalFrames - 1)) * duration;
-        frames[i] = await captureFrame(t);
-        framesLoaded++;
-        const pct = Math.round((framesLoaded / totalFrames) * 100);
-        barFill.style.width = pct + '%';
+      const firstChunk = Math.min(chunkSize, totalFrames);
+      for (let i = 0; i < firstChunk; i++) {
+        await loadFrameImage(i);
+        setLoadProgress(((i + 1) / firstChunk) * 100);
       }
 
       isReady = true;
-      onFramesReady();
+      heroMode = 'frames';
+      ctx.drawImage(frames[0], 0, 0, canvas.width, canvas.height);
+      finishLoading();
+
+      (async () => {
+        for (let i = firstChunk; i < totalFrames; i++) {
+          try {
+            await loadFrameImage(i);
+          } catch (err) {
+            console.warn('Frame load failed', i, err);
+          }
+        }
+      })();
     }
 
-    function onFramesReady() {
-      // Draw first frame
-      if (frames[0]) ctx.drawImage(frames[0], 0, 0, canvas.width, canvas.height);
+    function initVideoScrub() {
+      heroMode = 'video';
+      video.src = (isMobile || saveData) ? 'tea-story-mobile.mp4' : 'tea-story-desktop.mp4';
+      video.preload = 'auto';
 
-      // Fade out loading screen
-      loadingScreen.classList.add('fade-out');
-      setTimeout(() => { loadingScreen.style.display = 'none'; }, 850);
+      video.addEventListener('progress', () => {
+        if (!video.duration || !video.buffered.length) return;
+        const buffered = video.buffered.end(video.buffered.length - 1);
+        setLoadProgress((buffered / video.duration) * 100);
+      });
 
-      // Init GSAP animations
-      initAnimations();
+      video.addEventListener('canplay', () => {
+        if (isReady) return;
+        isReady = true;
+        setLoadProgress(100);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        finishLoading();
+      }, { once: true });
 
-      // Start render loop
-      startRenderLoop();
+      video.addEventListener('error', () => initStaticHero(), { once: true });
+      video.load();
     }
+
+    function initStaticHero() {
+      heroMode = 'static';
+      document.body.classList.add('hero-static');
+      isReady = true;
+      setLoadProgress(100);
+      drawPoster();
+      finishLoading();
+    }
+
+    function getScrollProgress() {
+      const heroTop = heroEl.offsetTop;
+      const heroHeight = heroEl.offsetHeight - window.innerHeight;
+      const scrollY = window.scrollY - heroTop;
+      return Math.max(0, Math.min(1, scrollY / heroHeight));
+    }
+
+    function updateScrollTarget() {
+      const progress = getScrollProgress();
+      if (heroMode === 'frames') {
+        targetFrame = Math.round(progress * (totalFrames - 1));
+      } else if (heroMode === 'video' && video.duration) {
+        const targetTime = progress * video.duration;
+        if (Math.abs(video.currentTime - targetTime) > 0.03) {
+          video.currentTime += (targetTime - video.currentTime) * 0.25;
+        }
+      }
+    }
+    window.addEventListener('scroll', updateScrollTarget, { passive: true });
 
     function startRenderLoop() {
       function loop() {
         rafId = requestAnimationFrame(loop);
-        if (!isReady) return;
-        // Smooth towards target
-        if (currentFrame !== targetFrame) {
-          currentFrame += (targetFrame - currentFrame) * 0.25;
-          currentFrame = Math.round(currentFrame);
-        }
-        const idx = Math.max(0, Math.min(totalFrames - 1, currentFrame));
-        if (frames[idx]) {
-          ctx.drawImage(frames[idx], 0, 0, canvas.width, canvas.height);
+        if (!isReady || heroMode === 'static' || !heroInView) return;
+
+        if (heroMode === 'frames') {
+          if (currentFrame !== targetFrame) {
+            currentFrame += (targetFrame - currentFrame) * 0.25;
+            currentFrame = Math.round(currentFrame);
+          }
+          const idx = Math.max(0, Math.min(totalFrames - 1, currentFrame));
+          if (frames[idx]) {
+            ctx.drawImage(frames[idx], 0, 0, canvas.width, canvas.height);
+          } else {
+            drawPoster();
+          }
+        } else if (heroMode === 'video' && video.readyState >= 2) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         }
       }
       loop();
     }
 
-    // Map scroll progress (0-1) inside hero to frame index
-    function updateFrame() {
-      const heroEl = document.getElementById('hero');
-      const heroTop = heroEl.offsetTop;
-      const heroHeight = heroEl.offsetHeight - window.innerHeight;
-      const scrollY = window.scrollY - heroTop;
-      const progress = Math.max(0, Math.min(1, scrollY / heroHeight));
-      targetFrame = Math.round(progress * (totalFrames - 1));
+    async function bootHero() {
+      drawPoster();
+      setLoadProgress(5);
+
+      if (prefersReducedMotion || saveData) {
+        initStaticHero();
+        return;
+      }
+
+      if (isMobile) {
+        initVideoScrub();
+        return;
+      }
+
+      try {
+        await initFrameSequence();
+      } catch (err) {
+        console.warn('Frame sequence unavailable, falling back to video scrub', err);
+        initVideoScrub();
+      }
     }
-    window.addEventListener('scroll', updateFrame, { passive: true });
 
-    // Start loading when metadata available
-    video.addEventListener('loadedmetadata', () => {
-      extractFrames().catch(console.error);
-    });
-
-    // Trigger load
-    video.load();
+    bootHero();
 
     /* ────────────────────────────────────────
        GSAP SCROLL-TRIGGERED TEXT ANIMATIONS
@@ -930,11 +1063,39 @@
     function initAnimations() {
       gsap.registerPlugin(ScrollTrigger);
 
-      const hero    = document.getElementById('hero');
-      const heroH   = hero.offsetHeight;
-      const winH    = window.innerHeight;
-      // Converts a scroll % within hero to pixels from top
+      const hero = document.getElementById('hero');
+      const heroH = hero.offsetHeight;
+      const winH = window.innerHeight;
       const pct = (p) => hero.offsetTop + (heroH - winH) * p;
+
+      if (prefersReducedMotion) {
+        gsap.set('.text-overlay', { opacity: 0 });
+        gsap.to('.text-overlay', {
+          opacity: 1,
+          duration: 1.2,
+          stagger: 0.15,
+          ease: 'power2.out',
+          scrollTrigger: {
+            trigger: '#hero',
+            start: 'top center',
+            toggleActions: 'play none none reverse',
+          },
+        });
+        gsap.utils.toArray('.tea-card').forEach((card) => {
+          gsap.from(card, {
+            opacity: 0,
+            y: 24,
+            duration: 0.8,
+            ease: 'power2.out',
+            scrollTrigger: {
+              trigger: card,
+              start: 'top 90%',
+              toggleActions: 'play none none none',
+            },
+          });
+        });
+        return;
+      }
 
       /* Helper: fade in + hold + fade out */
       function fadeInOut(el, inStart, inEnd, outStart, outEnd, extraVars) {
@@ -953,10 +1114,8 @@
           .to(el, { opacity: 0, duration: (outEnd - outStart) / range, ease: 'none' });
       }
 
-      /* ── OV 1: ASSAM TEA title — 3%–5% in, hold to 13%, out 13%–17% ── */
       fadeInOut(document.getElementById('ov-title'), 0.03, 0.07, 0.12, 0.17);
 
-      /* ── OV 2: Ancient wisdom — word by word 18%–26%, hold, out 33%–36% ── */
       (function () {
         const words = document.querySelectorAll('#ov-wisdom .word');
         const tl = gsap.timeline({
@@ -968,19 +1127,14 @@
             invalidateOnRefresh: true,
           }
         });
-        // Container fade in
         tl.to('#ov-wisdom', { opacity: 1, duration: 0.06 });
-        // Each word
         words.forEach((w, i) => {
           tl.to(w, { opacity: 1, duration: 0.05 }, 0.06 + i * 0.05);
         });
-        // Hold
         tl.to({}, { duration: 0.25 });
-        // Fade out
         tl.to('#ov-wisdom', { opacity: 0, duration: 0.08 });
       })();
 
-      /* ── OV 3: Centuries — slide in from right 30%, out by 42% ── */
       (function () {
         const el = document.getElementById('ov-craft');
         const tl = gsap.timeline({
@@ -997,14 +1151,12 @@
           .to(el, { opacity: 0, duration: 0.2 });
       })();
 
-      /* ── OV 4: Watch nature transform — 43%–48% in, out 52%–56% ── */
       fadeInOut(document.getElementById('ov-nature'), 0.42, 0.47, 0.51, 0.56);
 
-      /* ── OV 5/6/7: Pour Wait Breathe — staggered 56%–68%, out 69%–72% ── */
       (function () {
-        const wrap  = document.getElementById('ov-pour-wrap');
-        const pour  = document.getElementById('ov-pour');
-        const wait  = document.getElementById('ov-wait');
+        const wrap = document.getElementById('ov-pour-wrap');
+        const pour = document.getElementById('ov-pour');
+        const wait = document.getElementById('ov-wait');
         const breathe = document.getElementById('ov-breathe');
 
         const tl = gsap.timeline({
@@ -1016,28 +1168,25 @@
             invalidateOnRefresh: true,
           }
         });
-        tl.to(wrap,   { opacity: 1, duration: 0.01 })
-          .to(pour,   { opacity: 1, duration: 0.08 })
+        tl.to(wrap, { opacity: 1, duration: 0.01 })
+          .to(pour, { opacity: 1, duration: 0.08 })
           .to({}, { duration: 0.06 })
-          .to(wait,   { opacity: 1, duration: 0.08 })
+          .to(wait, { opacity: 1, duration: 0.08 })
           .to({}, { duration: 0.06 })
-          .to(breathe,{ opacity: 1, duration: 0.08 })
+          .to(breathe, { opacity: 1, duration: 0.08 })
           .to({}, { duration: 0.18 })
-          .to(wrap,   { opacity: 0, duration: 0.1 });
+          .to(wrap, { opacity: 0, duration: 0.1 });
       })();
 
-      /* ── OV 8: Three minutes — 71%–76% in, hold, out 80%–84% ── */
       fadeInOut(document.getElementById('ov-minutes'), 0.70, 0.75, 0.79, 0.84);
 
-      /* ── OV 9: SEREN — character by character 84%–91%, hold, out 93%–96% ── */
       (function () {
         const titleEl = document.getElementById('ov-seren-title');
-        const subEl   = document.getElementById('ov-seren-sub');
-        const wrap    = document.getElementById('ov-seren');
+        const subEl = document.getElementById('ov-seren-sub');
+        const wrap = document.getElementById('ov-seren');
 
-        // Build character spans
         const titleText = 'SEREN.';
-        const subText   = 'Steeped in silence.';
+        const subText = 'Steeped in silence.';
         titleEl.innerHTML = titleText.split('').map(c =>
           c === ' ' ? '&nbsp;' : `<span class="char">${c}</span>`
         ).join('');
@@ -1063,7 +1212,6 @@
           .to(wrap, { opacity: 0, duration: 0.08 });
       })();
 
-      /* ── OV 10: Begin ritual button — 94%–96% in, hold ── */
       (function () {
         const el = document.getElementById('ov-ritual');
         const tl = gsap.timeline({
@@ -1079,7 +1227,6 @@
           .to(el, { opacity: 1, duration: 0.7 });
       })();
 
-      /* ── Collection section: cards slide in ── */
       gsap.utils.toArray('.tea-card').forEach((card, i) => {
         gsap.from(card, {
           opacity: 0,
@@ -1095,7 +1242,6 @@
         });
       });
 
-      /* ── Newsletter title ── */
       gsap.from('#newsletter-title', {
         opacity: 0,
         y: 30,

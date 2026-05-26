@@ -1,0 +1,5 @@
+{
+  "count": 140,
+  "pattern": "frame_%04d.webp",
+  "chunkSize": 30
+}
